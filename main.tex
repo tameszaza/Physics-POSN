@@ -1,0 +1,161 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Lachaise Assignment
+% LaTeX Template
+% Version 1.0 (26/6/2018)
+%
+% This template originates from:
+% http://www.LaTeXTemplates.com
+%
+% Authors:
+% Marion Lachaise & François Févotte
+% Vel (vel@LaTeXTemplates.com)
+%
+% License:
+% CC BY-NC-SA 3.0 (http://creativecommons.org/licenses/by-nc-sa/3.0/)
+% 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%----------------------------------------------------------------------------------------
+%	PACKAGES AND OTHER DOCUMENT CONFIGURATIONS
+%----------------------------------------------------------------------------------------
+
+\documentclass[12pt,a4paper]{report}
+
+\input{structure.tex} % Include the file specifying the document structure and custom 
+
+% =========================================================
+% Recommended preamble additions for Thai physics notes
+% Compile with XeLaTeX
+% =========================================================
+
+
+\usepackage{fontspec}
+\usepackage{polyglossia}
+
+\setmainlanguage{thai}
+\setotherlanguage{english}
+
+\defaultfontfeatures{Ligatures=TeX}
+
+\setmainfont[
+    Path = thsarabun/,
+    UprightFont = * ,
+    BoldFont = * Bold,
+    ItalicFont = * Italic,
+    BoldItalicFont = * BoldItalic,
+    Extension = .ttf,
+    Scale = 1.25
+]{THSarabunNew}
+
+\newfontfamily\thaifont[
+    Path = thsarabun/,
+    UprightFont = * ,
+    BoldFont = * Bold,
+    ItalicFont = * Italic,
+    BoldItalicFont = * BoldItalic,
+    Extension = .ttf,
+    Scale = 1.25
+]{THSarabunNew}
+
+\newfontfamily\thaifontsf[
+    Path = thsarabun/,
+    UprightFont = * ,
+    BoldFont = * Bold,
+    ItalicFont = * Italic,
+    BoldItalicFont = * BoldItalic,
+    Extension = .ttf,
+    Scale = 1.25
+]{THSarabunNew}
+
+\newfontfamily\thaifonttt[
+    Path = thsarabun/,
+    UprightFont = * ,
+    BoldFont = * Bold,
+    ItalicFont = * Italic,
+    BoldItalicFont = * BoldItalic,
+    Extension = .ttf,
+    Scale = 1.25
+]{THSarabunNew}
+
+\XeTeXlinebreaklocale'th'
+\XeTeXlinebreakskip= 0pt plus 1pt
+
+\usepackage{amsmath, amssymb}
+\usepackage{siunitx}
+\usepackage{physics}
+\usepackage{enumitem}
+\usepackage{multicol}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\usepackage[most]{tcolorbox}
+\usepackage{graphicx}
+
+%----------------------------------------------------------------------------------------
+%	WATERMARK
+%----------------------------------------------------------------------------------------
+
+\usepackage{eso-pic} % Allows adding content to every page background
+\usepackage{tikz} % Used to draw the watermark
+
+\AddToShipoutPictureFG{%
+	\begin{tikzpicture}[remember picture, overlay]
+		\node[
+			rotate=45,
+			opacity=0.08,
+			scale=10,
+			text=black
+		] at (current page.center) {%
+			\sffamily\bfseries P'TAMES%
+		};
+	\end{tikzpicture}%
+}
+\pgfplotsset{compat=1.18}
+
+\sisetup{
+    per-mode=symbol,
+    detect-all
+}
+
+\newtcolorbox{examplebox}[1]{
+    colback=blue!3,
+    colframe=blue!60!black,
+    title=#1,
+    fonttitle=\bfseries,
+    breakable
+}
+
+\newtcolorbox{exercisebox}[1]{
+    colback=green!3,
+    colframe=green!45!black,
+    title=#1,
+    fonttitle=\bfseries,
+    breakable
+}
+% =========================================================
+% Header and copyright footer
+% =========================================================
+\usepackage{fancyhdr}
+
+\pagestyle{fancy}
+\fancyhf{}
+
+\fancyhead[L]{\small การเคลื่อนที่แนวตรง}
+\fancyhead[R]{\small สอวน. ฟิสิกส์ ค่าย 1}
+
+\fancyfoot[L]{\footnotesize \textcopyright\ 2026 Tames Thanakrit Damduan}
+\fancyfoot[C]{\footnotesize ใช้เพื่อการเรียนการสอน}
+\fancyfoot[R]{\footnotesize หน้า \thepage}
+
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0.4pt}
+\begin{document}
+
+% \maketitle % Print the title
+
+
+% \input{chapters/chapter-02-linear-motion.tex}
+% \input{chapters/chapter-03-vectors.tex}
+\input{chapters/chapter-04-two-dimensional-motion.tex}
+\input{chapters/chapter-05-laws-of-motion.tex}
+
+\end{document}

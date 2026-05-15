@@ -1,0 +1,55 @@
+# Local assets and references
+img/*
+Ref/*
+
+# LaTeX build artifacts
+*.acn
+*.acr
+*.alg
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.brf
+*.dvi
+*.fdb_latexmk
+*.fls
+*.glg
+*.glo
+*.gls
+*.idx
+*.ilg
+*.ind
+*.ist
+*.lof
+*.log
+*.lot
+*.nav
+*.out
+*.run.xml
+*.snm
+*.synctex.gz
+*.toc
+*.vrb
+*.xdv
+
+# Generated PDFs
+*.pdf
+
+# LaTeX temp and editor backup files
+*.bak
+*.tmp
+*~
+.\#*
+*.swp
+*.swo
+
+# latexindent backups
+indent.log
+*.bak[0-9]
+
+# OS/editor metadata
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
