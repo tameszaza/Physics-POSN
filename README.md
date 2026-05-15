@@ -34,11 +34,44 @@ To clean generated files:
 latexmk -c
 ```
 
+## Export Selected Chapters
+
+Use `export-config.tex` to choose between a full PDF and selected chapters.
+
+For the full document:
+
+```tex
+\ExportSelectedChaptersfalse
+```
+
+For only selected chapters:
+
+```tex
+\ExportSelectedChapterstrue
+\def\ExportChapterList{chapters/chapter-06-circular-motion}
+```
+
+For multiple selected chapters:
+
+```tex
+\ExportSelectedChapterstrue
+\def\ExportChapterList{chapters/chapter-04-two-dimensional-motion,chapters/chapter-06-circular-motion}
+```
+
+Do not include `.tex` in `\ExportChapterList`.
+
+To keep chapter numbers, page numbers, and contents entries the same as the full document:
+
+1. Compile once with `\ExportSelectedChaptersfalse`.
+2. Change `export-config.tex` to `\ExportSelectedChapterstrue`.
+3. Compile again.
+
 ## Project Structure
 
 ```text
 .
 ├── main.tex
+├── export-config.tex
 ├── structure.tex
 ├── chapters/
 │   ├── chapter-02-linear-motion.tex

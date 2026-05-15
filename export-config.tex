@@ -1,0 +1,21 @@
+% Export interface for main.tex
+%
+% Normal full export:
+%   \ExportSelectedChaptersfalse
+%
+% Export only selected chapters while keeping original chapter/page numbers:
+%   1. Compile the full book once with \ExportSelectedChaptersfalse.
+%   2. Change to \ExportSelectedChapterstrue.
+%   3. Put the chapter file names you want in \ExportChapterList.
+%   4. Compile again with XeLaTeX or latexmk -xelatex.
+
+\newif\ifExportSelectedChapters
+
+% Change this line to true when you want only selected chapters.
+\ExportSelectedChapterstrue
+
+% Do not add ".tex" here.
+% Examples:
+%   \def\ExportChapterList{chapters/chapter-06-circular-motion}
+%   \def\ExportChapterList{chapters/chapter-04-two-dimensional-motion,chapters/chapter-06-circular-motion}
+\def\ExportChapterList{chapters/chapter-04-two-dimensional-motion,chapters/chapter-05-laws-of-motion, chapters/chapter-06-circular-motion}

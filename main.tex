@@ -148,14 +148,26 @@
 
 \renewcommand{\headrulewidth}{0.4pt}
 \renewcommand{\footrulewidth}{0.4pt}
+
+% =========================================================
+% Export config
+% =========================================================
+% Edit export-config.tex to export the full book or only selected chapters.
+\input{export-config.tex}
+
+\ifExportSelectedChapters
+	\includeonly{\ExportChapterList}
+\fi
+
 \begin{document}
 
 % \maketitle % Print the title
 
 
-% \input{chapters/chapter-02-linear-motion.tex}
-% \input{chapters/chapter-03-vectors.tex}
-\input{chapters/chapter-04-two-dimensional-motion.tex}
-\input{chapters/chapter-05-laws-of-motion.tex}
+\include{chapters/chapter-02-linear-motion}
+\include{chapters/chapter-03-vectors}
+\include{chapters/chapter-04-two-dimensional-motion}
+\include{chapters/chapter-05-laws-of-motion}
+\include{chapters/chapter-06-circular-motion}
 
 \end{document}
