@@ -48,14 +48,14 @@ For only selected chapters:
 
 ```tex
 \ExportSelectedChapterstrue
-\def\ExportChapterList{chapters/chapter-06-circular-motion}
+\def\ExportChapterList{chapters/chapter-05-circular-motion}
 ```
 
 For multiple selected chapters:
 
 ```tex
 \ExportSelectedChapterstrue
-\def\ExportChapterList{chapters/chapter-04-two-dimensional-motion,chapters/chapter-06-circular-motion}
+\def\ExportChapterList{chapters/chapter-03-two-dimensional-motion,chapters/chapter-05-circular-motion}
 ```
 
 Do not include `.tex` in `\ExportChapterList`.
@@ -74,11 +74,12 @@ To keep chapter numbers, page numbers, and contents entries the same as the full
 ├── export-config.tex
 ├── structure.tex
 ├── chapters/
-│   ├── chapter-02-linear-motion.tex
-│   ├── chapter-03-vectors.tex
-│   ├── chapter-04-two-dimensional-motion.tex
-│   ├── chapter-05-laws-of-motion.tex
-│   └── chapter-06-circular-motion.tex
+│   ├── chapter-01-linear-motion.tex
+│   ├── chapter-02-vectors.tex
+│   ├── chapter-03-two-dimensional-motion.tex
+│   ├── chapter-04-laws-of-motion.tex
+│   ├── chapter-05-circular-motion.tex
+│   └── chapter-06-energy.tex
 ├── thsarabun/
 ├── img/
 └── Ref/
@@ -90,8 +91,9 @@ Enable or disable chapters by editing the `\input{...}` lines near the end of `m
 
 Current active chapters:
 
-- `chapters/chapter-04-two-dimensional-motion.tex`
-- `chapters/chapter-05-laws-of-motion.tex`
+- `chapters/chapter-04-laws-of-motion.tex`
+- `chapters/chapter-05-circular-motion.tex`
+- `chapters/chapter-06-energy.tex`
 
 ## Notes
 

@@ -63,6 +63,19 @@ v=\text{constant}
 \vec{a}_c \text{ ชี้เข้าหาศูนย์กลาง}
 \]
 
+\begin{center}
+\begin{tikzpicture}[scale=1.05, >=stealth]
+    \draw[thick] (0,0) circle (1.8);
+    \fill (0,0) circle (1.3pt) node[below left] {$O$};
+    \coordinate (P) at (1.27,1.27);
+    \fill[blue!70!black] (P) circle (3pt) node[above right] {$m$};
+    \draw[dashed] (0,0) -- (P) node[midway, above left] {$r$};
+    \draw[->, very thick, red!75!black] (P) -- ++(-1.05,1.05) node[above] {$\vec{v}$};
+    \draw[->, very thick, blue!70!black] (P) -- ++(-0.9,-0.9) node[midway, below right] {$\vec{a}_c$};
+    \node[align=center] at (0,-2.45) {ความเร็วชี้ตามแนวสัมผัส\\ความเร่งชี้เข้าหาศูนย์กลาง};
+\end{tikzpicture}
+\end{center}
+
 \begin{tcolorbox}[title=ข้อควรจำ]
 อัตราเร็วเป็นขนาดของความเร็ว ถ้าอัตราเร็วคงตัว แต่ทิศของความเร็วเปลี่ยน เวกเตอร์ความเร็วยังเปลี่ยนอยู่ ดังนั้นวัตถุยังมีความเร่ง
 \end{tcolorbox}
@@ -254,6 +267,26 @@ a_t=\frac{dv}{dt}
 
 ลูกตุ้มกรวยคือมวล $m$ ผูกกับเชือกแล้วเคลื่อนที่เป็นวงกลมในแนวระดับ โดยเชือกทำมุม $\theta$ กับแนวดิ่ง
 
+\begin{center}
+\begin{tikzpicture}[scale=1.12, >=stealth]
+    \coordinate (O) at (0,2.4);
+    \coordinate (M) at (1.45,0.15);
+    \coordinate (C) at (0,0.15);
+    \fill (O) circle (2pt) node[above] {จุดแขวน};
+    \draw[thick] (O) -- (M);
+    \draw[dashed] (O) -- (0,-0.15);
+    \draw[dashed] (C) ellipse (1.45 and 0.28);
+    \draw[dashed] (C) -- (M) node[midway, below] {$r$};
+    \fill[blue!70!black] (M) circle (4pt) node[below right] {$m$};
+    \draw[->, very thick, blue!70!black] (M) -- (0.55,1.55) node[midway, right] {$T$};
+    \draw[->, very thick, red!75!black] (M) -- ++(0,-1.15) node[below] {$mg$};
+    \draw[->, thick, blue!70!black] (M) -- ++(-0.95,0) node[below left] {$T\sin\theta$};
+    \draw[->, thick, blue!70!black] (M) -- ++(0,0.95) node[above right] {$T\cos\theta$};
+    \draw (0,1.75) arc (-90:-58:0.65);
+    \node at (0.32,1.58) {$\theta$};
+\end{tikzpicture}
+\end{center}
+
 แรงที่กระทำต่อมวลมีสองแรง
 
 \[
@@ -329,6 +362,19 @@ v=\sqrt{rg\tan\theta}
 
 รถเลี้ยวบนถนนราบต้องมีแรงเข้าหาศูนย์กลาง ถ้ารถไม่ไถล แรงที่ทำหน้าที่เป็นแรงสู่ศูนย์กลางคือแรงเสียดทานสถิตระหว่างยางกับถนน
 
+\begin{center}
+\begin{tikzpicture}[scale=1.0, >=stealth]
+    \draw[thick] (0,0) circle (1.8);
+    \fill (0,0) circle (1.5pt) node[below] {ศูนย์กลาง};
+    \coordinate (Car) at (0,1.8);
+    \draw[fill=gray!20, thick] (-0.35,1.63) rectangle (0.35,1.97);
+    \draw[->, very thick, red!75!black] (Car) -- (0,0.55) node[midway, right] {$f_s$};
+    \draw[->, thick] (Car) -- ++(1.05,0) node[right] {$\vec{v}$};
+    \draw[dashed] (0,0) -- (Car) node[midway, left] {$r$};
+    \node[align=center] at (3.25,0.25) {มองจากด้านบน\\แรงเสียดทานสถิตเป็นแรงสู่ศูนย์กลาง};
+\end{tikzpicture}
+\end{center}
+
 แรงเสียดทานสถิตสูงสุดคือ
 
 \[
@@ -377,6 +423,25 @@ v_{\max}=\sqrt{\mu_sgr}
 ถนนโค้งเอียงทำให้แรงปกติมีองค์ประกอบเข้าหาศูนย์กลางได้ แม้ไม่มีแรงเสียดทาน
 
 ให้ถนนเอียงทำมุม $\theta$ กับแนวระดับ และรถเคลื่อนที่เป็นวงกลมรัศมี $r$
+
+\begin{center}
+\begin{tikzpicture}[scale=1.08, >=stealth]
+    \draw[thick] (-2.1,0) -- (2.1,0);
+    \draw[thick, rotate around={18:(0,0)}] (-1.65,0) -- (1.65,0);
+    \draw (1.15,0) arc (0:18:1.15);
+    \node at (1.38,0.18) {$\theta$};
+    \begin{scope}[rotate around={18:(0,0)}]
+        \draw[fill=gray!20, thick] (-0.35,0.03) rectangle (0.35,0.35);
+        \coordinate (M) at (0,0.2);
+    \end{scope}
+    \draw[->, very thick, red!75!black] (M) -- ++(0,-1.3) node[below] {$mg$};
+    \draw[->, very thick, blue!70!black] (M) -- ++(-0.47,1.43) node[above] {$N$};
+    \draw[->, thick, blue!70!black] (M) -- ++(-0.9,0) node[midway, below] {$N\sin\theta$};
+    \draw[->, thick, blue!70!black] (M) -- ++(0,1.12) node[midway, right] {$N\cos\theta$};
+    \node[left] at (-2.15,0.82) {เข้าศูนย์กลาง};
+    \draw[->, thick] (-1.45,0.72) -- (-0.7,0.34);
+\end{tikzpicture}
+\end{center}
 
 แรงที่กระทำต่อรถมี
 
