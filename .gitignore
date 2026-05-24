@@ -32,6 +32,7 @@ Ref/*
 *.toc
 *.vrb
 *.xdv
+*.zip
 
 # Generated PDFs
 *.pdf
