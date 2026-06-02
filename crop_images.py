@@ -1,489 +1,306 @@
-
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
-import sys
+from typing import Final
 
 import fitz  # PyMuPDF
-from PIL import Image, ImageDraw, ImageOps
+from PIL import Image, ImageChops, ImageDraw
 
 
 # =========================================================
-# POSN image cropper for chapter-12-temperature.tex
-#
-# Run from the LaTeX project root:
-#   python crop_temperature_images.py
-#
-# Install dependencies once if needed:
-#   python -m pip install pymupdf pillow
-#
-# Verified source PDFs currently present in this project:
-#   Ref/posn1-60-physics.pdf
-#   Ref/posn1-61-physics.pdf
-#   Ref/posn1-62-physics.pdf
-#   Ref/posn1-67-physics-1.pdf
-#   Ref/06-*.pdf  (the POSN 2568 paper)
-#
-# Output images:
-#   img/posn60p1q18.png
-#   img/posn60p2q9.png
-#   img/posn61q18.png
-#   img/posn61p2q9.png
-#   img/posn62q7.png
-#   img/posn62q8.png
-#   img/posn67q15.png
-#   img/posn68q9.png
-#   img/posn68q10.png
-#
-# The 2563-center paper is not present in the uploaded working folder.
-# Therefore this verified script intentionally does not generate:
-#   img/posn63centerq8.png
-#   img/posn63centerq9.png
-#   img/posn63centerq30.png
+# Configuration
 # =========================================================
 
+PDF_PATH: Final[Path] = Path("Ref/physics_posn_63.pdf")
+OUTPUT_DIR: Final[Path] = Path("img")
+VERIFICATION_DIR: Final[Path] = Path("verification")
 
-ROOT = Path(__file__).resolve().parent
-REF_DIR = ROOT / "Ref"
-OUT_DIR = ROOT / "img"
-PREVIEW_PATH = OUT_DIR / "_temperature_crop_preview.png"
-DPI = 300
+# Rendering at 3 times the native PDF resolution gives clear images
+# while keeping the output file sizes reasonable.
+ZOOM: Final[float] = 3.0
+
+# Used when removing unnecessary white margins around each crop.
+WHITE_THRESHOLD: Final[int] = 8
+TRIM_PADDING: Final[int] = 24
+
+
+@dataclass(frozen=True)
+class MaskRectangle:
+    """
+    A white rectangle drawn after rendering.
+
+    Coordinates are pixel coordinates inside the rendered crop,
+    not PDF coordinates.
+    """
+
+    left: int
+    top: int
+    right: int
+    bottom: int
 
 
 @dataclass(frozen=True)
 class ProblemCrop:
-    output_name: str
-    source_pdf: str
-    page: int  # 1-based page number
-    crop: tuple[float, float, float, float]  # left, top, right, bottom in PDF coordinates
-    title: str
+    """
+    Definition of one question crop.
+
+    page_index:
+        Zero-based PDF page index.
+        The uploaded PDF includes its cover page, so question 8 is
+        located at page index 3 even though the exam page says page 3 of 11.
+
+    crop_box:
+        PDF coordinates in points:
+        (left, top, right, bottom)
+    """
+
+    output_filename: str
+    page_index: int
+    crop_box: tuple[float, float, float, float]
+    masks: tuple[MaskRectangle, ...] = ()
 
 
-# These rectangles were visually checked against the source PDFs.
-# Each rectangle includes the entire question and its figure or choices,
-# while stopping inside whitespace before the neighboring question.
-PROBLEMS: tuple[ProblemCrop, ...] = (
+# =========================================================
+# Exact crop positions for the uploaded 2563 exam PDF
+# =========================================================
+
+PROBLEM_CROPS: Final[tuple[ProblemCrop, ...]] = (
     ProblemCrop(
-        output_name="posn60p1q18.png",
-        source_pdf="posn1-60-physics.pdf",
-        page=8,
-        crop=(64, 193, 533, 382),
-        title="ปี 2560 ตอนที่ 1 ข้อ 18: น้ำร้อนผสมกับน้ำมันในภาชนะฉนวน",
+        output_filename="posn63centerq8.png",
+        page_index=3,
+        crop_box=(28, 281, 580, 480),
+
+        # The figure from question 7 contains a small curved line extending
+        # slightly below its question region. It is unrelated to question 8.
+        # This mask removes only that stray line without affecting question 8.
+        masks=(
+            MaskRectangle(
+                left=0,
+                top=0,
+                right=1656,
+                bottom=60,
+            ),
+        ),
     ),
     ProblemCrop(
-        output_name="posn60p2q9.png",
-        source_pdf="posn1-60-physics.pdf",
-        page=11,
-        crop=(64, 412, 533, 610),
-        title="ปี 2560 ตอนที่ 2 ข้อ 9: ทรงกระบอกและทรงกลมทองแดงขยายตัว",
+        output_filename="posn63centerq9.png",
+        page_index=3,
+        crop_box=(28, 492, 580, 762),
     ),
     ProblemCrop(
-        output_name="posn61q18.png",
-        source_pdf="posn1-61-physics.pdf",
-        page=9,
-        crop=(85, 246, 532, 512),
-        title="ปี 2561 ข้อ 18: แถบโลหะสองชนิดโค้งเป็นวงกลม",
-    ),
-    ProblemCrop(
-        output_name="posn61p2q9.png",
-        source_pdf="posn1-61-physics.pdf",
-        page=14,
-        crop=(85, 60, 532, 206),
-        title="ปี 2561 ตอนที่ 2 ข้อ 9: โลหะร้อน น้ำ และน้ำแข็ง",
-    ),
-    ProblemCrop(
-        output_name="posn62q7.png",
-        source_pdf="posn1-62-physics.pdf",
-        page=3,
-        crop=(83, 603, 540, 768),
-        title="ปี 2562 ข้อ 7: การกระจายอุณหภูมิในแท่งเนื้อเดียว",
-    ),
-    ProblemCrop(
-        output_name="posn62q8.png",
-        source_pdf="posn1-62-physics.pdf",
-        page=4,
-        crop=(83, 64, 540, 197),
-        title="ปี 2562 ข้อ 8: คาบลูกตุ้มเมื่อเส้นลวดขยายตัว",
-    ),
-    ProblemCrop(
-        output_name="posn67q15.png",
-        source_pdf="posn1-67-physics-1.pdf",
-        page=6,
-        crop=(48, 73, 550, 424),
-        title="ปี 2567 ข้อ 15: การนำความร้อนร่วมกับการแผ่รังสี",
-    ),
-    ProblemCrop(
-        output_name="posn68q9.png",
-        source_pdf="__POSN_2568__",
-        page=3,
-        crop=(48, 424, 550, 582),
-        title="ปี 2568 ข้อ 9: อัตราการไหลของพลังงานผ่านท่อนำความร้อน",
-    ),
-    ProblemCrop(
-        output_name="posn68q10.png",
-        source_pdf="__POSN_2568__",
-        page=3,
-        crop=(48, 583, 550, 765),
-        title="ปี 2568 ข้อ 10: อุณหภูมิที่รอยต่อของท่อนำความร้อน",
+        output_filename="posn63centerq30.png",
+        page_index=11,
+        crop_box=(28, 300, 580, 552),
     ),
 )
 
 
-MISSING_SOURCE_OUTPUTS = (
-    "img/posn63centerq8.png",
-    "img/posn63centerq9.png",
-    "img/posn63centerq30.png",
-)
+# =========================================================
+# Image processing functions
+# =========================================================
 
-
-def find_posn_2568_pdf() -> Path:
+def trim_white_margin(
+    image: Image.Image,
+    padding: int = TRIM_PADDING,
+) -> Image.Image:
     """
-    Locate the POSN 2568 PDF without depending on its escaped Thai filename.
+    Remove excessive white space while preserving a comfortable margin.
 
-    The uploaded folder stores this PDF with an escaped filename beginning
-    with '06-', so matching Ref/06-*.pdf is more reliable than hard-coding
-    the complete filename.
+    The crop coordinates already prevent neighboring questions from
+    appearing. This function only makes the final PNG more compact.
     """
-    candidates = sorted(REF_DIR.glob("06-*.pdf"))
 
-    if not candidates:
-        raise FileNotFoundError(
-            "Cannot find the POSN 2568 PDF. "
-            "Expected one file matching Ref/06-*.pdf"
+    rgb_image = image.convert("RGB")
+    white_background = Image.new("RGB", rgb_image.size, "white")
+
+    difference = ImageChops.difference(
+        rgb_image,
+        white_background,
+    ).convert("L")
+
+    difference = difference.point(
+        lambda pixel: 255 if pixel > WHITE_THRESHOLD else 0
+    )
+
+    content_box = difference.getbbox()
+
+    if content_box is None:
+        return rgb_image
+
+    left, top, right, bottom = content_box
+
+    return rgb_image.crop(
+        (
+            max(0, left - padding),
+            max(0, top - padding),
+            min(rgb_image.width, right + padding),
+            min(rgb_image.height, bottom + padding),
         )
-
-    for candidate in candidates:
-        try:
-            with fitz.open(candidate) as document:
-                first_page_text = document[0].get_text("text")
-
-            if "2568" in first_page_text:
-                return candidate
-        except Exception:
-            continue
-
-    if len(candidates) == 1:
-        return candidates[0]
-
-    raise FileNotFoundError(
-        "Found multiple Ref/06-*.pdf files but could not identify "
-        "the POSN 2568 paper."
     )
 
 
-def resolve_pdf(source_pdf: str) -> Path:
-    """
-    Convert the PDF identifier stored in PROBLEMS into an actual file path.
-    """
-    if source_pdf == "__POSN_2568__":
-        return find_posn_2568_pdf()
-
-    return REF_DIR / source_pdf
-
-
-def render_crop(
+def render_problem_crop(
+    page: fitz.Page,
     problem: ProblemCrop,
-    pdf_path: Path,
+) -> Image.Image:
+    """
+    Render one cropped question from the PDF as a high-resolution PNG.
+    """
+
+    crop_rectangle = fitz.Rect(*problem.crop_box)
+
+    pixmap = page.get_pixmap(
+        matrix=fitz.Matrix(ZOOM, ZOOM),
+        clip=crop_rectangle,
+        alpha=False,
+    )
+
+    image = Image.frombytes(
+        "RGB",
+        (pixmap.width, pixmap.height),
+        pixmap.samples,
+    )
+
+    if problem.masks:
+        draw = ImageDraw.Draw(image)
+
+        for mask in problem.masks:
+            draw.rectangle(
+                (
+                    mask.left,
+                    mask.top,
+                    mask.right,
+                    mask.bottom,
+                ),
+                fill="white",
+            )
+
+    return trim_white_margin(image)
+
+
+def create_verification_contact_sheet(
+    image_paths: list[Path],
     output_path: Path,
 ) -> None:
     """
-    Render one rectangular region from a PDF page into a high-resolution PNG.
+    Create one preview image containing all generated crops.
+
+    Open this contact sheet once after running the script to quickly
+    confirm that every question is complete.
     """
-    if not pdf_path.exists():
-        raise FileNotFoundError(f"Missing source PDF: {pdf_path}")
 
-    with fitz.open(pdf_path) as document:
-        if problem.page < 1 or problem.page > document.page_count:
-            raise ValueError(
-                f"Page {problem.page} is outside {pdf_path.name}; "
-                f"the PDF has {document.page_count} pages."
-            )
-
-        page = document[problem.page - 1]
-        rectangle = fitz.Rect(*problem.crop)
-
-        if not page.rect.contains(rectangle):
-            raise ValueError(
-                f"Crop rectangle {problem.crop} is outside page size "
-                f"{page.rect} for {pdf_path.name}, page {problem.page}."
-            )
-
-        matrix = fitz.Matrix(DPI / 72, DPI / 72)
-
-        pixmap = page.get_pixmap(
-            matrix=matrix,
-            clip=rectangle,
-            alpha=False,
-        )
-
-        pixmap.save(output_path)
-
-
-def nonwhite_bbox(
-    image: Image.Image,
-    threshold: int = 248,
-):
-    """
-    Return the smallest box containing visible content.
-
-    Near-white pixels are treated as background. This allows the script
-    to detect obviously blank crops and crops that may have clipped text.
-    """
-    grayscale = image.convert("L")
-
-    mask = grayscale.point(
-        lambda pixel: 255 if pixel < threshold else 0
-    )
-
-    return mask.getbbox()
-
-
-def validate_crop(
-    image_path: Path,
-) -> tuple[bool, str]:
-    """
-    Detect obvious crop failures.
-
-    This checks that:
-    1. The crop is not blank.
-    2. Visible text or a figure is not touching an image edge.
-
-    The rectangles were also manually reviewed against the source PDFs,
-    so this automatic check acts as an additional guard.
-    """
-    image = Image.open(image_path).convert("RGB")
-    bounding_box = nonwhite_bbox(image)
-
-    if bounding_box is None:
-        return False, "crop is blank"
-
-    left, top, right, bottom = bounding_box
-    width, height = image.size
-
-    margins = {
-        "left": left,
-        "top": top,
-        "right": width - right,
-        "bottom": height - bottom,
-    }
-
-    minimum_margin = min(margins.values())
-
-    if minimum_margin < 4:
-        return (
-            False,
-            f"visible content is too close to an edge: {margins}",
-        )
-
-    return (
-        True,
-        f"size={width}x{height}, visible-content margins={margins}",
-    )
-
-
-def make_preview(
-    image_paths: Iterable[Path],
-    preview_path: Path,
-) -> None:
-    """
-    Create a vertical contact sheet containing all generated crops.
-
-    Open img/_temperature_crop_preview.png after running the script
-    to review every question at once.
-    """
     cards: list[Image.Image] = []
 
-    card_width = 1000
-    padding = 30
-    label_height = 52
+    for image_path in image_paths:
+        image = Image.open(image_path).convert("RGB")
 
-    for path in image_paths:
-        image = Image.open(path).convert("RGB")
+        preview = image.copy()
+        preview.thumbnail((1200, 720))
 
-        image.thumbnail(
-            (card_width - 2 * padding, 650)
-        )
+        card_width = 1240
+        card_height = preview.height + 90
 
         card = Image.new(
             "RGB",
-            (
-                card_width,
-                image.height + label_height + 2 * padding,
-            ),
+            (card_width, card_height),
             "white",
         )
 
-        draw = ImageDraw.Draw(card)
+        x_position = (card_width - preview.width) // 2
+        card.paste(preview, (x_position, 50))
 
+        draw = ImageDraw.Draw(card)
         draw.text(
-            (padding, 16),
-            path.name,
+            (20, 16),
+            image_path.name,
             fill="black",
         )
 
-        x = (card_width - image.width) // 2
-        y = label_height + padding
+        cards.append(card)
 
-        card.paste(
-            image,
-            (x, y),
-        )
-
-        cards.append(
-            ImageOps.expand(
-                card,
-                border=1,
-                fill="black",
-            )
-        )
-
+    separator_height = 24
     total_height = (
         sum(card.height for card in cards)
-        + padding * (len(cards) + 1)
+        + separator_height * (len(cards) - 1)
     )
 
-    sheet = Image.new(
+    contact_sheet = Image.new(
         "RGB",
-        (
-            card_width + 2 * padding,
-            total_height,
-        ),
+        (1240, total_height),
         (235, 235, 235),
     )
 
-    current_y = padding
+    current_y = 0
 
     for card in cards:
-        sheet.paste(
-            card,
-            (padding, current_y),
+        contact_sheet.paste(card, (0, current_y))
+        current_y += card.height + separator_height
+
+    contact_sheet.save(output_path, optimize=True)
+
+
+# =========================================================
+# Main program
+# =========================================================
+
+def main() -> None:
+    if not PDF_PATH.exists():
+        raise FileNotFoundError(
+            f"Cannot find '{PDF_PATH}'. "
+            "Place this script in the same directory as physics_posn_63.pdf "
+            "or update PDF_PATH near the top of the script."
         )
 
-        current_y += card.height + padding
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    VERIFICATION_DIR.mkdir(parents=True, exist_ok=True)
 
-    sheet.save(preview_path)
+    generated_images: list[Path] = []
 
+    with fitz.open(PDF_PATH) as document:
+        if len(document) < 12:
+            raise ValueError(
+                "The PDF has fewer pages than expected. "
+                "Check that you are using the correct physics_posn_63.pdf file."
+            )
 
-def main() -> int:
-    """
-    Generate all verified temperature-chapter problem crops.
-    """
-    OUT_DIR.mkdir(
-        parents=True,
-        exist_ok=True,
+        for problem in PROBLEM_CROPS:
+            page = document[problem.page_index]
+            cropped_image = render_problem_crop(page, problem)
+
+            output_path = OUTPUT_DIR / problem.output_filename
+
+            cropped_image.save(
+                output_path,
+                format="PNG",
+                optimize=True,
+            )
+
+            generated_images.append(output_path)
+
+            print(
+                f"Created: {output_path} "
+                f"({cropped_image.width} x {cropped_image.height} px)"
+            )
+
+    contact_sheet_path = (
+        VERIFICATION_DIR / "posn63_temperature_contact_sheet.png"
     )
 
-    print(
-        "Cropping verified POSN images "
-        "for the temperature chapter...\n"
+    create_verification_contact_sheet(
+        generated_images,
+        contact_sheet_path,
     )
 
-    created: list[Path] = []
-    failures: list[str] = []
+    print()
+    print("Finished cropping the 2563 temperature questions.")
+    print(f"Verification preview: {contact_sheet_path}")
+    print()
+    print("Generated files:")
 
-    for problem in PROBLEMS:
-        pdf_path = resolve_pdf(
-            problem.source_pdf
-        )
-
-        output_path = OUT_DIR / problem.output_name
-
-        try:
-            render_crop(
-                problem=problem,
-                pdf_path=pdf_path,
-                output_path=output_path,
-            )
-
-            passed, details = validate_crop(
-                output_path
-            )
-
-            status = "OK" if passed else "CHECK"
-
-            print(
-                f"{status:5} "
-                f"{output_path.relative_to(ROOT)}"
-            )
-
-            print(
-                f"      {problem.title}"
-            )
-
-            print(
-                f"      source={pdf_path.relative_to(ROOT)}, "
-                f"page={problem.page}"
-            )
-
-            print(
-                f"      {details}"
-            )
-
-            created.append(
-                output_path
-            )
-
-            if not passed:
-                failures.append(
-                    problem.output_name
-                )
-
-        except Exception as error:
-            print(
-                f"ERROR {problem.output_name}: {error}",
-                file=sys.stderr,
-            )
-
-            failures.append(
-                problem.output_name
-            )
-
-    if created:
-        make_preview(
-            image_paths=created,
-            preview_path=PREVIEW_PATH,
-        )
-
-        print(
-            "\nPreview contact sheet: "
-            f"{PREVIEW_PATH.relative_to(ROOT)}"
-        )
-
-    print(
-        "\nNot generated because the required "
-        "2563-center source PDF is absent:"
-    )
-
-    for missing_output in MISSING_SOURCE_OUTPUTS:
-        print(
-            f"  - {missing_output}"
-        )
-
-    if failures:
-        print(
-            "\nSome generated files need inspection:",
-            file=sys.stderr,
-        )
-
-        for name in failures:
-            print(
-                f"  - {name}",
-                file=sys.stderr,
-            )
-
-        return 1
-
-    print(
-        "\nDone. All available temperature-chapter crops "
-        "passed the automated edge checks."
-    )
-
-    return 0
+    for image_path in generated_images:
+        print(f"  - {image_path}")
 
 
 if __name__ == "__main__":
-    raise SystemExit(
-        main()
-    )
+    main()
