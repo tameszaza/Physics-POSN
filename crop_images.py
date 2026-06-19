@@ -1,21 +1,18 @@
 #!/usr/bin/env python3
 """
-Crop the POSN exam images used by the chapter:
-    Ideal Gases, Kinetic Theory, and the First Law of Thermodynamics
+Verified POSN electrostatics crop script.
 
-Run from the directory that contains the POSN PDF files:
-    python3 crop_thermo_exam_images.py
+Run from the LaTeX project root:
+    python3 crop_electrostatics_verified.py
 
-Requirements:
-    pip install pymupdf pillow
+Required packages:
+    pip install pymupdf pillow numpy
 
-The script creates the images expected by the LaTeX chapter inside ./img/
-and also writes a contact sheet for visual verification:
-    img/_verify_thermo_exam_crops.jpg
-
-Crop rectangles are deliberately specified manually after checking every source
-page. They are normalized to the page size, so the script remains stable even
-when a PDF renderer uses a different DPI.
+Output:
+    img/posn60q12.png
+    img/posn60p2q6.png
+    ...
+    crop_review/electrostatics_verified_sheet.jpg
 """
 
 from __future__ import annotations
@@ -23,282 +20,328 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
-import sys
+import math
 
 import fitz  # PyMuPDF
-from PIL import Image, ImageChops, ImageDraw, ImageOps
+import numpy as np
+from PIL import Image, ImageDraw
 
 
-# Rendering scale. 3.0 gives clear images for insertion into a PDF without
-# making each crop unnecessarily large.
-RENDER_SCALE = 3.0
-OUTPUT_DIR = Path("img")
-CONTACT_SHEET_NAME = "_verify_thermo_exam_crops.jpg"
+DPI = 240
+ROOT = Path.cwd()
+IMG_DIR = ROOT / "img"
+REVIEW_DIR = ROOT / "crop_review"
 
 
 @dataclass(frozen=True)
-class CropSpec:
-    output_name: str
+class CropItem:
+    output: str
     pdf_candidates: tuple[str, ...]
-    page_number: int  # Human-readable PDF page number, starting from 1
-    crop: tuple[float, float, float, float]  # x0, y0, x1, y1 normalized to page
-    label: str
+    page: int  # 1-indexed
+    # Crop box measured on the reference preview image.
+    # The script converts it to fractional coordinates so it still works at any DPI.
+    box_px: tuple[int, int, int, int]
+    ref_size: tuple[int, int]
+    # Optional white rectangles applied before final whitespace trim.
+    # Each rectangle uses fractions of the crop image: left, top, right, bottom.
+    whiteouts: tuple[tuple[float, float, float, float], ...] = ()
 
 
-# Each box was checked against the original page so that it includes the full
-# statement, every answer choice, and every required diagram while excluding
-# lines from the neighboring questions.
-CROPS: tuple[CropSpec, ...] = (
-    CropSpec(
-        "posn60q19.png",
-        ("posn1-60-physics.pdf",),
-        8,
-        (0.105, 0.472, 0.885, 0.590),
-        "2560 ข้อ 19",
+CROPS: list[CropItem] = [
+    CropItem(
+        "posn60q12.png",
+        ("posn1-60-physics.pdf", "physics_posn_60.pdf", "physics-posn-60.pdf"),
+        6,
+        (95, 700, 980, 915),
+        (1075, 1521),
     ),
-    CropSpec(
-        "posn61q17.png",
-        ("posn1-61-physics.pdf",),
-        9,
-        (0.122, 0.073, 0.900, 0.260),
-        "2561 ข้อ 17",
-    ),
-    CropSpec(
-        "posn61q19.png",
-        ("posn1-61-physics.pdf",),
+    CropItem(
+        "posn60p2q6.png",
+        ("posn1-60-physics.pdf", "physics_posn_60.pdf", "physics-posn-60.pdf"),
         10,
-        (0.122, 0.073, 0.900, 0.260),
-        "2561 ข้อ 19",
+        (85, 980, 985, 1205),
+        (1075, 1521),
     ),
-    CropSpec(
-        "posn62q16.png",
-        ("posn1-62-physics.pdf",),
-        6,
-        (0.120, 0.402, 0.905, 0.686),
-        "2562 ข้อ 16",
+    CropItem(
+        "posn61q12.png",
+        ("posn1-61-physics.pdf", "physics_posn_61.pdf", "physics-posn-61.pdf"),
+        7,
+        (140, 100, 990, 625),
+        (1105, 1430),
     ),
-    CropSpec(
-        "posn63centerq10.png",
-        ("physics_posn_63.pdf",),
-        5,
-        (0.055, 0.087, 0.945, 0.235),
-        "ศูนย์ สอวน. 2563 ข้อ 10",
+    CropItem(
+        "posn61q14.png",
+        ("posn1-61-physics.pdf", "physics_posn_61.pdf", "physics-posn-61.pdf"),
+        7,
+        (140, 880, 990, 1350),
+        (1105, 1430),
     ),
-    CropSpec(
-        "posn63centerq11.png",
-        ("physics_posn_63.pdf",),
-        5,
-        (0.055, 0.255, 0.945, 0.500),
-        "ศูนย์ สอวน. 2563 ข้อ 11",
+    CropItem(
+        "posn62q9.png",
+        ("posn1-62-physics.pdf", "physics_posn_62.pdf", "physics-posn-62.pdf"),
+        4,
+        (130, 400, 980, 780),
+        (1075, 1520),
     ),
-    CropSpec(
-        "posn63centerq29.png",
-        ("physics_posn_63.pdf",),
-        12,
-        (0.055, 0.087, 0.945, 0.342),
-        "ศูนย์ สอวน. 2563 ข้อ 29",
-    ),
-    CropSpec(
-        "posn64q14.png",
-        ("posn1-64-physics.pdf",),
-        5,
-        (0.055, 0.655, 0.940, 0.800),
-        "2564 ข้อ 14",
-    ),
-    CropSpec(
-        "posn65q14.png",
-        ("posn1-65-physics.pdf",),
-        6,
-        (0.075, 0.045, 0.940, 0.235),
-        "2565 ข้อ 14",
-    ),
-    CropSpec(
-        "posn66q5.png",
-        ("posn1-66-physics.pdf",),
-        3,
-        (0.075, 0.045, 0.900, 0.405),
-        "2566 ข้อ 5",
-    ),
-    CropSpec(
-        "posn66q7.png",
-        ("posn1-66-physics.pdf",),
-        3,
-        (0.075, 0.635, 0.930, 0.785),
-        "2566 ข้อ 7",
-    ),
-    CropSpec(
-        "posn66q24.png",
-        ("posn1-66-physics.pdf",),
+    CropItem(
+        "posn62q25.png",
+        ("posn1-62-physics.pdf", "physics_posn_62.pdf", "physics-posn-62.pdf"),
         9,
-        (0.075, 0.595, 0.930, 0.680),
-        "2566 ข้อ 24",
+        (125, 500, 985, 860),
+        (1075, 1520),
     ),
-)
+    CropItem(
+        "posn63centerq6.png",
+        ("physics_posn_63.pdf", "physics-posn-63.pdf", "posn1-63-physics.pdf"),
+        3,
+        (70, 900, 1015, 1340),
+        (1075, 1521),
+    ),
+    CropItem(
+        "posn63centerq7.png",
+        ("physics_posn_63.pdf", "physics-posn-63.pdf", "posn1-63-physics.pdf"),
+        4,
+        (70, 125, 1010, 540),
+        (1075, 1521),
+        whiteouts=((0.0, 0.88, 0.12, 1.0),),
+    ),
+    CropItem(
+        "posn64q8.png",
+        ("posn1-64-physics.pdf", "physics_posn_64.pdf", "physics-posn-64.pdf"),
+        4,
+        (45, 15, 920, 310),
+        (960, 1373),
+    ),
+    CropItem(
+        "posn64q9.png",
+        ("posn1-64-physics.pdf", "physics_posn_64.pdf", "physics-posn-64.pdf"),
+        4,
+        (45, 300, 920, 725),
+        (960, 1373),
+    ),
+    CropItem(
+        "posn64q10.png",
+        ("posn1-64-physics.pdf", "physics_posn_64.pdf", "physics-posn-64.pdf"),
+        4,
+        (45, 750, 925, 1040),
+        (960, 1373),
+    ),
+    CropItem(
+        "posn64q16.png",
+        ("posn1-64-physics.pdf", "physics_posn_64.pdf", "physics-posn-64.pdf"),
+        6,
+        (45, 170, 925, 470),
+        (960, 1373),
+    ),
+    CropItem(
+        "posn65q3.png",
+        ("posn1-65-physics.pdf", "physics_posn_65.pdf", "physics-posn-65.pdf"),
+        2,
+        (45, 720, 925, 1120),
+        (960, 1371),
+    ),
+    CropItem(
+        "posn65q4.png",
+        ("posn1-65-physics.pdf", "physics_posn_65.pdf", "physics-posn-65.pdf"),
+        3,
+        (45, 60, 925, 515),
+        (960, 1371),
+    ),
+    CropItem(
+        "posn65q7.png",
+        ("posn1-65-physics.pdf", "physics_posn_65.pdf", "physics-posn-65.pdf"),
+        4,
+        (45, 60, 925, 360),
+        (960, 1371),
+    ),
+    CropItem(
+        "posn65q17.png",
+        ("posn1-65-physics.pdf", "physics_posn_65.pdf", "physics-posn-65.pdf"),
+        7,
+        (45, 60, 925, 430),
+        (960, 1371),
+    ),
+    CropItem(
+        "posn66q12.png",
+        ("posn1-66-physics.pdf", "physics_posn_66.pdf", "physics-posn-66.pdf"),
+        5,
+        (75, 280, 1000, 1120),
+        (1075, 1521),
+    ),
+    CropItem(
+        "posn66q26.png",
+        ("posn1-66-physics.pdf", "physics_posn_66.pdf", "physics-posn-66.pdf"),
+        10,
+        (75, 85, 1000, 365),
+        (1075, 1521),
+    ),
+    CropItem(
+        "posn66q27.png",
+        ("posn1-66-physics.pdf", "physics_posn_66.pdf", "physics-posn-66.pdf"),
+        10,
+        (75, 380, 1000, 720),
+        (1075, 1521),
+    ),
+    CropItem(
+        "posn68q4.png",
+        ("06-วิชาฟิสิกส์.pdf", "posn1-68-physics.pdf", "physics_posn_68.pdf"),
+        2,
+        (75, 930, 1060, 1285),
+        (1075, 1521),
+    ),
+    CropItem(
+        "posn68q17.png",
+        ("06-วิชาฟิสิกส์.pdf", "posn1-68-physics.pdf", "physics_posn_68.pdf"),
+        5,
+        (75, 805, 1060, 1075),
+        (1075, 1521),
+    ),
+    CropItem(
+        "posn68q19.png",
+        ("06-วิชาฟิสิกส์.pdf", "posn1-68-physics.pdf", "physics_posn_68.pdf"),
+        6,
+        (75, 65, 1065, 350),
+        (1075, 1521),
+    ),
+]
 
 
-def locate_pdf(candidates: Iterable[str]) -> Path:
-    searched: list[Path] = []
-    for candidate in candidates:
-        path = Path(candidate)
-        searched.append(path)
-        if path.exists():
-            return path
+def iter_pdfs(root: Path) -> Iterable[Path]:
+    ignored = {".git", "node_modules", "venv", ".venv", "__pycache__", "img", "crop_review"}
+    for path in root.rglob("*.pdf"):
+        if any(part in ignored for part in path.parts):
+            continue
+        yield path
 
-        if not path.is_absolute() and (not path.parts or path.parts[0].lower() != "ref"):
-            for ref_dir in (Path("Ref"), Path("ref")):
-                ref_path = ref_dir / path
-                searched.append(ref_path)
-                if ref_path.exists():
-                    return ref_path
 
-    expected = ", ".join(str(path) for path in searched)
+def find_pdf(candidates: tuple[str, ...], all_pdfs: list[Path]) -> Path:
+    candidate_names = {name.lower() for name in candidates}
+    for pdf in all_pdfs:
+        if pdf.name.lower() in candidate_names:
+            return pdf
+
+    keywords = [name.lower().replace("_", "-").replace(" ", "") for name in candidates]
+    for pdf in all_pdfs:
+        normalized = pdf.name.lower().replace("_", "-").replace(" ", "")
+        if any(key.replace("_", "-").replace(" ", "") in normalized for key in keywords):
+            return pdf
+
     raise FileNotFoundError(
-        "Missing PDF. Expected one of: " + expected
+        "Could not find PDF. Expected one of: " + ", ".join(candidates)
     )
 
 
-def normalized_to_pdf_rect(
-    page_rect: fitz.Rect,
-    crop: tuple[float, float, float, float],
-) -> fitz.Rect:
-    x0, y0, x1, y1 = crop
-    if not (0 <= x0 < x1 <= 1 and 0 <= y0 < y1 <= 1):
-        raise ValueError(f"Invalid normalized crop rectangle: {crop}")
-    return fitz.Rect(
-        page_rect.x0 + x0 * page_rect.width,
-        page_rect.y0 + y0 * page_rect.height,
-        page_rect.x0 + x1 * page_rect.width,
-        page_rect.y0 + y1 * page_rect.height,
-    )
+def render_page(pdf_path: Path, page_number: int) -> Image.Image:
+    doc = fitz.open(pdf_path)
+    try:
+        page = doc[page_number - 1]
+        pix = page.get_pixmap(matrix=fitz.Matrix(DPI / 72, DPI / 72), alpha=False)
+        return Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+    finally:
+        doc.close()
 
 
-def pixmap_to_image(pix: fitz.Pixmap) -> Image.Image:
-    mode = "RGBA" if pix.alpha else "RGB"
-    return Image.frombytes(mode, (pix.width, pix.height), pix.samples).convert("RGB")
+def fractional_box(item: CropItem) -> tuple[float, float, float, float]:
+    x0, y0, x1, y1 = item.box_px
+    width, height = item.ref_size
+    return x0 / width, y0 / height, x1 / width, y1 / height
 
 
-def edge_warning(image: Image.Image, border: int = 3, threshold: int = 245) -> bool:
-    """Return True when dark content touches a crop edge.
-
-    A warning does not necessarily indicate an error, but it is useful when a
-    future PDF version shifts its layout and the crop needs manual inspection.
-    """
-    gray = image.convert("L")
-    w, h = gray.size
-    edges = [
-        gray.crop((0, 0, w, min(border, h))),
-        gray.crop((0, max(0, h - border), w, h)),
-        gray.crop((0, 0, min(border, w), h)),
-        gray.crop((max(0, w - border), 0, w, h)),
-    ]
-    for edge in edges:
-        extrema = edge.getextrema()
-        if extrema and extrema[0] < threshold:
-            return True
-    return False
-
-
-def crop_one(spec: CropSpec) -> tuple[Path, Image.Image, bool]:
-    pdf_path = locate_pdf(spec.pdf_candidates)
-    with fitz.open(pdf_path) as doc:
-        if not 1 <= spec.page_number <= len(doc):
-            raise IndexError(
-                f"{pdf_path}: page {spec.page_number} does not exist; PDF has {len(doc)} pages"
-            )
-        page = doc[spec.page_number - 1]
-        clip = normalized_to_pdf_rect(page.rect, spec.crop)
-        pix = page.get_pixmap(
-            matrix=fitz.Matrix(RENDER_SCALE, RENDER_SCALE),
-            clip=clip,
-            alpha=False,
+def crop_by_fraction(image: Image.Image, box: tuple[float, float, float, float]) -> Image.Image:
+    width, height = image.size
+    x0, y0, x1, y1 = box
+    return image.crop(
+        (
+            round(x0 * width),
+            round(y0 * height),
+            round(x1 * width),
+            round(y1 * height),
         )
-        image = pixmap_to_image(pix)
-        # Add a small white border so the LaTeX output has breathing room and
-        # edge checks are not triggered by text that legitimately begins close
-        # to a manually selected crop boundary.
-        image = ImageOps.expand(image, border=12, fill="white")
-
-    output_path = OUTPUT_DIR / spec.output_name
-    image.save(output_path, optimize=True)
-    return output_path, image, edge_warning(image)
+    )
 
 
-def fit_inside(image: Image.Image, width: int, height: int) -> Image.Image:
-    copied = image.copy()
-    copied.thumbnail((width, height), Image.Resampling.LANCZOS)
-    return copied
-
-
-def make_contact_sheet(items: list[tuple[CropSpec, Image.Image]]) -> Path:
-    cols = 2
-    cell_w = 920
-    cell_h = 480
-    header_h = 42
-    padding = 18
-    rows = (len(items) + cols - 1) // cols
-
-    sheet = Image.new("RGB", (cols * cell_w, rows * cell_h), "white")
-    draw = ImageDraw.Draw(sheet)
-
-    for index, (spec, image) in enumerate(items):
-        col = index % cols
-        row = index // cols
-        left = col * cell_w
-        top = row * cell_h
-
+def apply_whiteouts(image: Image.Image, whiteouts: tuple[tuple[float, float, float, float], ...]) -> None:
+    if not whiteouts:
+        return
+    draw = ImageDraw.Draw(image)
+    width, height = image.size
+    for left, top, right, bottom in whiteouts:
         draw.rectangle(
-            (left, top, left + cell_w - 1, top + cell_h - 1),
-            outline=(190, 190, 190),
-            width=1,
+            (
+                round(left * width),
+                round(top * height),
+                round(right * width),
+                round(bottom * height),
+            ),
+            fill="white",
         )
-        draw.text((left + padding, top + 12), f"{spec.label}  ->  {spec.output_name}", fill="black")
-
-        preview = fit_inside(
-            image,
-            cell_w - 2 * padding,
-            cell_h - header_h - 2 * padding,
-        )
-        x = left + (cell_w - preview.width) // 2
-        y = top + header_h + (cell_h - header_h - preview.height) // 2
-        sheet.paste(preview, (x, y))
-
-    path = OUTPUT_DIR / CONTACT_SHEET_NAME
-    sheet.save(path, quality=94, optimize=True)
-    return path
 
 
-def main() -> int:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+def trim_whitespace(image: Image.Image, padding: int = 14) -> Image.Image:
+    gray = image.convert("L")
+    arr = np.asarray(gray)
+    mask = arr < 248
+    if not mask.any():
+        return image
 
-    print("Cropping thermodynamics POSN questions...")
-    previews: list[tuple[CropSpec, Image.Image]] = []
-    warnings: list[str] = []
+    ys, xs = np.where(mask)
+    left = max(0, int(xs.min()) - padding)
+    top = max(0, int(ys.min()) - padding)
+    right = min(image.width, int(xs.max()) + padding)
+    bottom = min(image.height, int(ys.max()) + padding)
+    return image.crop((left, top, right, bottom))
 
-    for spec in CROPS:
-        try:
-            output_path, image, touches_edge = crop_one(spec)
-        except Exception as exc:
-            print(f"[ERROR] {spec.label}: {exc}", file=sys.stderr)
-            return 1
 
-        previews.append((spec, image))
-        status = "CHECK EDGE" if touches_edge else "OK"
-        print(f"[{status:10}] {spec.label:24} -> {output_path}  {image.width}x{image.height}px")
-        if touches_edge:
-            warnings.append(spec.output_name)
+def make_contact_sheet(paths: list[Path], output_path: Path) -> None:
+    cards: list[Image.Image] = []
+    for path in paths:
+        image = Image.open(path).convert("RGB")
+        image.thumbnail((560, 380), Image.Resampling.LANCZOS)
+        card = Image.new("RGB", (600, 450), "white")
+        card.paste(image, ((600 - image.width) // 2, 20))
+        draw = ImageDraw.Draw(card)
+        draw.text((10, 415), path.name, fill="red")
+        cards.append(card)
 
-    contact_sheet = make_contact_sheet(previews)
-    print(f"\nCreated contact sheet: {contact_sheet}")
-    if warnings:
-        print("\nSome crops contain dark content close to an edge. Open the contact sheet and inspect:")
-        for name in warnings:
-            print(f"  - {name}")
-    else:
-        print("All crop edges have safe whitespace margins.")
+    if not cards:
+        return
 
-    print("\nExpected LaTeX image paths were generated successfully.")
-    return 0
+    cols = 2
+    rows = math.ceil(len(cards) / cols)
+    sheet = Image.new("RGB", (cols * 600, rows * 450), "white")
+    for index, card in enumerate(cards):
+        sheet.paste(card, ((index % cols) * 600, (index // cols) * 450))
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    sheet.save(output_path)
+
+
+def main() -> None:
+    IMG_DIR.mkdir(exist_ok=True)
+    REVIEW_DIR.mkdir(exist_ok=True)
+
+    all_pdfs = list(iter_pdfs(ROOT))
+    if not all_pdfs:
+        raise SystemExit("No PDF files found under this project directory.")
+
+    saved_paths: list[Path] = []
+
+    for item in CROPS:
+        pdf_path = find_pdf(item.pdf_candidates, all_pdfs)
+        page_image = render_page(pdf_path, item.page)
+        cropped = crop_by_fraction(page_image, fractional_box(item))
+        apply_whiteouts(cropped, item.whiteouts)
+        cropped = trim_whitespace(cropped)
+
+        output_path = IMG_DIR / item.output
+        cropped.save(output_path)
+        saved_paths.append(output_path)
+        print(f"saved {output_path}  source={pdf_path.name} page={item.page}")
+
+    contact_sheet = REVIEW_DIR / "electrostatics_verified_sheet.jpg"
+    make_contact_sheet(saved_paths, contact_sheet)
+    print(f"saved {contact_sheet}")
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()
