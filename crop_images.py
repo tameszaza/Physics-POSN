@@ -1,35 +1,34 @@
 #!/usr/bin/env python3
-"""Crop every POSN exam question used by the DC circuit/capacitance chapter.
+"""Crop every POSN past-exam question used by the ray-optics chapter.
 
-The crop rectangles were calibrated against the exact exam PDFs used for the
-chapter and are stored as normalized page coordinates, so output stays correct
-at any render DPI.
+The crop rectangles are normalized to the source PDF page, so the output is
+stable at different render resolutions. The script also creates a contact sheet
+for visual checking and validates that every image referenced by the LaTeX
+chapter is generated.
 
 Requirements:
-    pip install pymupdf pillow
+    pip install pymupdf pillow numpy
 
 Example:
-    python crop_circuit_posn_questions.py \
+    python crop_ray_optics_posn_questions_verified.py \
         --input-dir . \
         --output-dir img \
-        --dpi 300 \
+        --tex-file chapter-ray-optics-mirrors-lenses.tex \
+        --dpi 320 \
         --preview
-
-The script exits immediately if a required PDF is missing, has too few pages,
-or any crop fails validation.
 """
 
 from __future__ import annotations
 
 import argparse
-import io
-import math
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-import fitz  # PyMuPDF
+import fitz
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 
@@ -44,305 +43,240 @@ class PdfSource:
 class CropJob:
     output_name: str
     source_key: str
-    page: int  # 1-based
-    box: tuple[float, float, float, float]  # normalized x0, y0, x1, y1
+    page: int  # 1-based PDF page number
+    box: tuple[float, float, float, float]
+    label: str
 
 
 SOURCES: dict[str, PdfSource] = {
-    "60": PdfSource("60", ("posn1-60-physics.pdf",), 11),
-    "61": PdfSource("61", ("posn1-61-physics.pdf",), 14),
-    "62": PdfSource("62", ("posn1-62-physics.pdf",), 7),
-    "64": PdfSource("64", ("posn1-64-physics.pdf",), 9),
-    "65": PdfSource("65", ("posn1-65-physics.pdf",), 3),
-    "66": PdfSource("66", ("posn1-66-physics.pdf",), 8),
-    "67": PdfSource("67", ("posn1-67-physics-1.pdf", "posn1-67-physics.pdf"), 6),
+    "60": PdfSource("60", ("posn1-60-physics.pdf", "physics_posn_60.pdf"), 11),
+    "61": PdfSource("61", ("posn1-61-physics.pdf", "physics_posn_61.pdf"), 14),
+    "62": PdfSource("62", ("posn1-62-physics.pdf", "physics_posn_62.pdf"), 4),
+    "63": PdfSource("63", ("physics_posn_63.pdf", "posn1-63-physics.pdf"), 10),
+    "66": PdfSource("66", ("posn1-66-physics.pdf", "physics_posn_66.pdf"), 7),
+    "67": PdfSource(
+        "67",
+        ("posn1-67-physics-1.pdf", "posn1-67-physics.pdf", "physics_posn_67.pdf"),
+        5,
+    ),
     "68": PdfSource(
         "68",
-        (
-            "06-วิชาฟิสิกส์.pdf",
-            "posn1-68-physics.pdf",
-            "physics-posn-68-full.pdf",
-            "physics-posn-68.pdf",
-        ),
-        5,
+        ("06-วิชาฟิสิกส์.pdf", "posn1-68-physics.pdf", "physics_posn_68.pdf"),
+        4,
     ),
 }
 
 
-# Each rectangle was visually checked against the rendered source page.
-# Coordinates use a PDF-style normalized page coordinate system:
-# (0, 0) = top-left and (1, 1) = bottom-right.
+# These rectangles were calibrated against the exact PDFs listed above.
+# Each box retains the complete statement, diagrams, and answer choices while
+# stopping before neighboring questions.
 JOBS: tuple[CropJob, ...] = (
-    CropJob("posn60q13.png", "60", 6, (0.050, 0.625, 0.965, 0.895)),
-    CropJob("posn60q14.png", "60", 7, (0.050, 0.030, 0.965, 0.460)),
-    CropJob("posn60q15.png", "60", 7, (0.050, 0.450, 0.965, 0.610)),
-    CropJob("posn60p2q7.png", "60", 11, (0.050, 0.025, 0.965, 0.345)),
-
-    CropJob("posn61q13.png", "61", 7, (0.050, 0.425, 0.965, 0.600)),
-    CropJob("posn61q14.png", "61", 7, (0.050, 0.570, 0.965, 0.950)),
-    CropJob("posn61q15.png", "61", 8, (0.050, 0.025, 0.965, 0.440)),
-    CropJob("posn61p2q7.png", "61", 13, (0.050, 0.025, 0.965, 0.345)),
-
-    CropJob("posn62q13.png", "62", 5, (0.045, 0.585, 0.975, 0.745)),
-    CropJob("posn62q14.png", "62", 5, (0.045, 0.730, 0.975, 0.945)),
-    CropJob("posn62q17.png", "62", 6, (0.045, 0.675, 0.975, 0.925)),
-    CropJob("posn62q21.png", "62", 7, (0.045, 0.675, 0.975, 0.925)),
-
-    CropJob("posn64q10.png", "64", 4, (0.045, 0.535, 0.975, 0.885)),
-    CropJob("posn64q11.png", "64", 5, (0.045, 0.005, 0.975, 0.190)),
-    CropJob("posn64q20.png", "64", 7, (0.045, 0.335, 0.975, 0.495)),
-    CropJob("posn64p2q26.png", "64", 9, (0.045, 0.020, 0.975, 0.345)),
-
-    CropJob("posn65q2.png", "65", 2, (0.045, 0.220, 0.975, 0.480)),
-    CropJob("posn65q6.png", "65", 3, (0.045, 0.640, 0.975, 0.855)),
-
-    CropJob("posn66q13.png", "66", 6, (0.045, 0.025, 0.975, 0.455)),
-    CropJob("posn66q19.png", "66", 8, (0.045, 0.270, 0.975, 0.495)),
-
-    CropJob("posn67q7.png", "67", 4, (0.045, 0.025, 0.975, 0.245)),
-    CropJob("posn67q8.png", "67", 4, (0.045, 0.245, 0.975, 0.415)),
-    CropJob("posn67q16.png", "67", 6, (0.045, 0.515, 0.975, 0.915)),
-
-    CropJob("posn68q7.png", "68", 3, (0.045, 0.245, 0.975, 0.370)),
-    CropJob("posn68q8.png", "68", 3, (0.045, 0.370, 0.975, 0.500)),
-    CropJob("posn68q16.png", "68", 5, (0.045, 0.335, 0.975, 0.535)),
-    CropJob("posn68q17.png", "68", 5, (0.045, 0.525, 0.975, 0.695)),
+    CropJob("posn60q20.png", "60", 8, (0.070, 0.590, 0.935, 0.765), "2560 ข้อ 20"),
+    CropJob("posn60p2q10.png", "60", 11, (0.070, 0.735, 0.935, 0.875), "2560 ตอนที่ 2 ข้อ 10"),
+    CropJob("posn61q20.png", "61", 10, (0.095, 0.268, 0.905, 0.430), "2561 ข้อ 20"),
+    CropJob("posn61p2q10.png", "61", 14, (0.095, 0.268, 0.905, 0.600), "2561 ตอนที่ 2 ข้อ 10"),
+    CropJob("posn62q2.png", "62", 2, (0.085, 0.195, 0.925, 0.515), "2562 ข้อ 2"),
+    CropJob("posn62q10.png", "62", 4, (0.085, 0.495, 0.925, 0.835), "2562 ข้อ 10"),
+    CropJob("posn63q24.png", "63", 10, (0.045, 0.090, 0.955, 0.430), "ศูนย์ สอวน. 2563 ข้อ 24"),
+    CropJob("posn63q25.png", "63", 10, (0.045, 0.435, 0.955, 0.825), "ศูนย์ สอวน. 2563 ข้อ 25"),
+    CropJob("posn66q15.png", "66", 7, (0.065, 0.045, 0.940, 0.300), "2566 ข้อ 15"),
+    CropJob("posn66q16.png", "66", 7, (0.065, 0.295, 0.940, 0.505), "2566 ข้อ 16"),
+    CropJob("posn66q17.png", "66", 7, (0.065, 0.535, 0.940, 0.900), "2566 ข้อ 17"),
+    CropJob("posn67q12.png", "67", 5, (0.060, 0.195, 0.940, 0.430), "2567 ข้อ 12"),
+    CropJob("posn67q14.png", "67", 5, (0.060, 0.545, 0.940, 0.715), "2567 ข้อ 14"),
+    CropJob("posn68q13.png", "68", 4, (0.060, 0.430, 0.940, 0.660), "2568 ข้อ 13"),
+    CropJob("posn68q14.png", "68", 4, (0.060, 0.655, 0.940, 0.900), "2568 ข้อ 14"),
 )
 
 
-def fail(message: str) -> "NoReturn":
-    print(f"ERROR: {message}", file=sys.stderr)
-    raise SystemExit(1)
+def iter_pdfs(root: Path) -> Iterable[Path]:
+    ignored = {".git", "node_modules", "venv", ".venv", "__pycache__", "img", "crop_review"}
+    for path in root.rglob("*.pdf"):
+        if any(part in ignored for part in path.parts):
+            continue
+        yield path
 
 
-def resolve_sources(input_dir: Path) -> dict[str, Path]:
-    resolved: dict[str, Path] = {}
-    errors: list[str] = []
-
-    for key, source in SOURCES.items():
-        chosen: Path | None = None
-        rejected: list[str] = []
-
-        for candidate in source.candidates:
-            path = input_dir / candidate
-            if not path.is_file():
-                continue
-            try:
-                with fitz.open(path) as doc:
-                    if len(doc) < source.min_pages:
-                        rejected.append(
-                            f"{candidate} has only {len(doc)} pages; "
-                            f"at least {source.min_pages} are required"
-                        )
-                        continue
-            except Exception as exc:
-                rejected.append(f"{candidate} cannot be opened: {exc}")
-                continue
-            chosen = path
-            break
-
-        if chosen is None:
-            expected = ", ".join(source.candidates)
-            detail = "; ".join(rejected)
-            line = f"256{key}: missing usable PDF. Expected one of: {expected}"
-            if detail:
-                line += f". Found but rejected: {detail}"
-            errors.append(line)
-        else:
-            resolved[key] = chosen
-
-    if errors:
-        fail("\n".join(errors))
-
-    return resolved
+def find_pdf(source: PdfSource, all_pdfs: list[Path]) -> Path:
+    candidate_names = {name.casefold() for name in source.candidates}
+    for pdf in all_pdfs:
+        if pdf.name.casefold() in candidate_names:
+            return pdf
+    raise FileNotFoundError(
+        f"Could not find source {source.key}. Expected one of: " + ", ".join(source.candidates)
+    )
 
 
-def normalized_box_to_rect(page_rect: fitz.Rect, box: tuple[float, float, float, float]) -> fitz.Rect:
+def normalized_rect(page: fitz.Page, box: tuple[float, float, float, float]) -> fitz.Rect:
     x0, y0, x1, y1 = box
     if not (0 <= x0 < x1 <= 1 and 0 <= y0 < y1 <= 1):
-        raise ValueError(f"Invalid normalized crop rectangle: {box}")
+        raise ValueError(f"Invalid normalized crop: {box}")
+    r = page.rect
     return fitz.Rect(
-        page_rect.x0 + x0 * page_rect.width,
-        page_rect.y0 + y0 * page_rect.height,
-        page_rect.x0 + x1 * page_rect.width,
-        page_rect.y0 + y1 * page_rect.height,
+        r.x0 + x0 * r.width,
+        r.y0 + y0 * r.height,
+        r.x0 + x1 * r.width,
+        r.y0 + y1 * r.height,
     )
 
 
-def trim_white_margin(image: Image.Image, threshold: int = 250, padding: int = 28) -> Image.Image:
-    """Trim only empty outer whitespace, never interior whitespace."""
-    rgb = image.convert("RGB")
-    gray = ImageOps.grayscale(rgb)
-    content_mask = gray.point(lambda value: 255 if value < threshold else 0)
-    bbox = content_mask.getbbox()
-    if bbox is None:
-        return rgb
-
-    left, top, right, bottom = bbox
-    left = max(0, left - padding)
-    top = max(0, top - padding)
-    right = min(rgb.width, right + padding)
-    bottom = min(rgb.height, bottom + padding)
-    return rgb.crop((left, top, right, bottom))
+def trim_whitespace(image: Image.Image, padding: int = 22) -> Image.Image:
+    gray = np.asarray(image.convert("L"))
+    mask = gray < 248
+    if not mask.any():
+        return image
+    ys, xs = np.where(mask)
+    left = max(0, int(xs.min()) - padding)
+    top = max(0, int(ys.min()) - padding)
+    right = min(image.width, int(xs.max()) + padding + 1)
+    bottom = min(image.height, int(ys.max()) + padding + 1)
+    return image.crop((left, top, right, bottom))
 
 
-def validate_crop(image: Image.Image, job: CropJob) -> None:
-    width, height = image.size
-    if width < 500 or height < 180:
-        fail(f"{job.output_name}: suspiciously small crop ({width} x {height})")
-
-    gray = ImageOps.grayscale(image)
-    pixels = gray.histogram()
-    total = width * height
-    dark = sum(pixels[:245])
-    dark_ratio = dark / total
-    if dark_ratio < 0.002:
-        fail(f"{job.output_name}: crop appears blank (dark ratio {dark_ratio:.5f})")
-
-    # Ensure the auto-trim padding did not get lost.
-    border = max(8, min(width, height) // 120)
-    edges = [
-        gray.crop((0, 0, width, border)),
-        gray.crop((0, height - border, width, height)),
-        gray.crop((0, 0, border, height)),
-        gray.crop((width - border, 0, width, height)),
-    ]
-    for edge in edges:
-        hist = edge.histogram()
-        edge_dark = sum(hist[:235])
-        if edge_dark / max(1, edge.width * edge.height) > 0.30:
-            print(
-                f"WARNING: {job.output_name}: dark content is close to a crop edge",
-                file=sys.stderr,
-            )
-
-
-def render_job(
-    job: CropJob,
-    source_path: Path,
-    output_dir: Path,
-    dpi: int,
-    trim: bool,
-) -> Path:
-    zoom = dpi / 72.0
-    with fitz.open(source_path) as doc:
-        if not 1 <= job.page <= len(doc):
-            fail(
-                f"{job.output_name}: page {job.page} does not exist in "
-                f"{source_path.name} ({len(doc)} pages)"
-            )
-        page = doc[job.page - 1]
-        clip = normalized_box_to_rect(page.rect, job.box)
-        pixmap = page.get_pixmap(
-            matrix=fitz.Matrix(zoom, zoom),
-            clip=clip,
-            alpha=False,
-            annots=True,
-        )
-        image = Image.open(io.BytesIO(pixmap.tobytes("png"))).convert("RGB")
-
-    if trim:
-        image = trim_white_margin(image)
-    validate_crop(image, job)
-
-    output_path = output_dir / job.output_name
-    image.save(output_path, format="PNG", optimize=True)
-    return output_path
-
-
-def make_preview(paths: Iterable[Path], preview_path: Path) -> None:
-    paths = list(paths)
-    font = ImageFont.load_default()
-    card_width, card_height = 820, 610
-    columns = 2
-    rows = math.ceil(len(paths) / columns)
-    sheet = Image.new(
-        "RGB",
-        (columns * card_width, rows * card_height),
-        (226, 226, 226),
+def validate_crop(image: Image.Image, name: str) -> list[str]:
+    warnings: list[str] = []
+    if image.width < 500 or image.height < 130:
+        warnings.append(f"{name}: suspiciously small crop {image.size}")
+    gray = np.asarray(image.convert("L"))
+    dark_fraction = float((gray < 240).mean())
+    if dark_fraction < 0.002:
+        warnings.append(f"{name}: crop appears blank")
+    border = max(3, min(image.width, image.height) // 300)
+    edges = np.concatenate(
+        [gray[:border, :].ravel(), gray[-border:, :].ravel(), gray[:, :border].ravel(), gray[:, -border:].ravel()]
     )
+    if float((edges < 210).mean()) > 0.08:
+        warnings.append(f"{name}: dark content may touch a crop edge")
+    return warnings
 
-    for index, path in enumerate(paths):
+
+def create_contact_sheet(items: list[tuple[CropJob, Path]], output: Path) -> None:
+    cards: list[Image.Image] = []
+    card_width = 1300
+    max_preview_width = 1240
+    max_preview_height = 780
+
+    try:
+        font = ImageFont.truetype("DejaVuSans.ttf", 28)
+    except OSError:
+        font = ImageFont.load_default()
+
+    for job, path in items:
         image = Image.open(path).convert("RGB")
-        image.thumbnail((card_width - 30, card_height - 60), Image.Resampling.LANCZOS)
-        card = Image.new("RGB", (card_width, card_height), "white")
-        card.paste(image, ((card_width - image.width) // 2, 42))
+        preview = image.copy()
+        preview.thumbnail((max_preview_width, max_preview_height), Image.Resampling.LANCZOS)
+        card = Image.new("RGB", (card_width, preview.height + 105), "white")
         draw = ImageDraw.Draw(card)
-        draw.text((10, 10), path.name, fill="black", font=font)
-        x = (index % columns) * card_width
-        y = (index // columns) * card_height
-        sheet.paste(card, (x, y))
+        draw.text((24, 18), f"{job.output_name} | {job.label}", fill="black", font=font)
+        card.paste(preview, ((card_width - preview.width) // 2, 75))
+        cards.append(card)
 
-    sheet.save(preview_path, format="JPEG", quality=92, optimize=True)
+    columns = 2
+    gap = 22
+    rows = (len(cards) + columns - 1) // columns
+    row_heights = []
+    for row in range(rows):
+        row_cards = cards[row * columns : (row + 1) * columns]
+        row_heights.append(max(card.height for card in row_cards))
+
+    sheet_width = columns * card_width + (columns + 1) * gap
+    sheet_height = sum(row_heights) + (rows + 1) * gap
+    sheet = Image.new("RGB", (sheet_width, sheet_height), (225, 225, 225))
+
+    y = gap
+    for row, row_height in enumerate(row_heights):
+        for col in range(columns):
+            index = row * columns + col
+            if index >= len(cards):
+                break
+            card = cards[index]
+            x = gap + col * (card_width + gap)
+            sheet.paste(card, (x, y))
+        y += row_height + gap
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    sheet.save(output, quality=90, optimize=True)
+
+
+def latex_image_names(tex_path: Path) -> set[str]:
+    text = tex_path.read_text(encoding="utf-8")
+    return {Path(match).name for match in re.findall(r"img/([^}\s]+\.png)", text)}
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Crop all POSN circuit/capacitance questions used by the LaTeX chapter."
-    )
-    parser.add_argument(
-        "--input-dir",
-        type=Path,
-        default=Path("."),
-        help="Directory containing the exam PDFs (default: current directory)",
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=Path("img"),
-        help="Directory for cropped PNG files (default: ./img)",
-    )
-    parser.add_argument(
-        "--dpi",
-        type=int,
-        default=300,
-        help="Render resolution. 250-350 is recommended (default: 300)",
-    )
-    parser.add_argument(
-        "--no-trim",
-        action="store_true",
-        help="Keep the full calibrated rectangle instead of trimming outer white space",
-    )
-    parser.add_argument(
-        "--preview",
-        action="store_true",
-        help="Also create circuit-question-crops-preview.jpg",
-    )
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input-dir", type=Path, default=Path("."))
+    parser.add_argument("--output-dir", type=Path, default=Path("img"))
+    parser.add_argument("--tex-file", type=Path, default=Path("chapter-ray-optics-mirrors-lenses.tex"))
+    parser.add_argument("--dpi", type=int, default=320)
+    parser.add_argument("--preview", action="store_true")
     return parser.parse_args()
 
 
-def main() -> None:
+def main() -> int:
     args = parse_args()
-    input_dir = args.input_dir.expanduser().resolve()
-    output_dir = args.output_dir.expanduser().resolve()
+    if args.dpi < 150:
+        raise ValueError("DPI should be at least 150")
 
-    if not input_dir.is_dir():
-        fail(f"Input directory does not exist: {input_dir}")
-    if not 120 <= args.dpi <= 600:
-        fail("--dpi must be between 120 and 600")
+    all_pdfs = list(iter_pdfs(args.input_dir.resolve()))
+    resolved: dict[str, Path] = {}
+    for key, source in SOURCES.items():
+        path = find_pdf(source, all_pdfs)
+        with fitz.open(path) as doc:
+            if len(doc) < source.min_pages:
+                raise ValueError(f"{path.name} has only {len(doc)} pages; expected at least {source.min_pages}")
+        resolved[key] = path
+        print(f"Source {key}: {path}")
 
-    resolved = resolve_sources(input_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    generated: list[tuple[CropJob, Path]] = []
+    all_warnings: list[str] = []
+    matrix = fitz.Matrix(args.dpi / 72.0, args.dpi / 72.0)
 
-    produced: list[Path] = []
-    for job in JOBS:
-        output_path = render_job(
-            job=job,
-            source_path=resolved[job.source_key],
-            output_dir=output_dir,
-            dpi=args.dpi,
-            trim=not args.no_trim,
-        )
-        produced.append(output_path)
-        print(f"OK  {output_path.name}")
+    docs: dict[str, fitz.Document] = {key: fitz.open(path) for key, path in resolved.items()}
+    try:
+        for job in JOBS:
+            doc = docs[job.source_key]
+            page = doc[job.page - 1]
+            pix = page.get_pixmap(matrix=matrix, clip=normalized_rect(page, job.box), alpha=False)
+            image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+            image = trim_whitespace(image)
+            output = args.output_dir / job.output_name
+            image.save(output, format="PNG", optimize=True)
+            warnings = validate_crop(image, job.output_name)
+            all_warnings.extend(warnings)
+            generated.append((job, output))
+            print(f"Created {output} ({image.width} x {image.height})")
+    finally:
+        for doc in docs.values():
+            doc.close()
+
+    expected = {job.output_name for job in JOBS}
+    if args.tex_file.exists():
+        referenced = latex_image_names(args.tex_file)
+        missing_from_script = referenced - expected
+        unused_by_tex = expected - referenced
+        if missing_from_script:
+            raise RuntimeError("LaTeX references images not generated by this script: " + ", ".join(sorted(missing_from_script)))
+        if unused_by_tex:
+            print("Warning: generated but not referenced: " + ", ".join(sorted(unused_by_tex)), file=sys.stderr)
+    else:
+        print(f"Warning: LaTeX file not found: {args.tex_file}", file=sys.stderr)
 
     if args.preview:
-        preview_path = output_dir / "circuit-question-crops-preview.jpg"
-        make_preview(produced, preview_path)
-        print(f"OK  {preview_path.name}")
+        preview_path = args.output_dir / "ray-optics-question-crops-preview.jpg"
+        create_contact_sheet(generated, preview_path)
+        print(f"Created preview {preview_path}")
 
-    print(f"\nCompleted: {len(produced)} question images written to {output_dir}")
+    if all_warnings:
+        print("Crop validation warnings:", file=sys.stderr)
+        for warning in all_warnings:
+            print(f"  - {warning}", file=sys.stderr)
+        return 2
+
+    print(f"Verified {len(generated)} crop files.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
